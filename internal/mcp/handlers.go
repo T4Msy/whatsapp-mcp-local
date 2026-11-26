@@ -31,6 +31,7 @@ type arguments struct {
 	URL        string   `json:"url"`
 	Caption    string   `json:"caption"`
 	Filename   string   `json:"filename"`
+	Voice      *bool    `json:"voice"`
 	Since      string   `json:"since"`
 	Until      string   `json:"until"`
 	Order      string   `json:"order"`
@@ -657,6 +658,15 @@ func (s *Server) sendMedia(ctx context.Context, a arguments) map[string]any {
 	if sticker && (a.Caption != "" || a.Filename != "") {
 		return toolError("a sticker carries no caption or file name")
 	}
+	if a.Voice != nil && *a.Voice && as != "audio" {
+		return toolError("voice applies only to audio")
+	}
+	voice := wantsVoice(as, a.Voice, a.To)
+	// A voice note carries no caption: it is left out, and the result says so.
+	var captionDropped string
+	if voice && a.Caption != "" {
+		captionDropped = "a voice note carries no caption, so the caption was not sent: send it as a text message, or pass voice false to send the audio as a file with it"
+	}
 	reply, fail := s.replyArgs(ctx, a.ReplyTo, a.To)
 	if fail != nil {
 		return fail
@@ -664,6 +674,13 @@ func (s *Server) sendMedia(ctx context.Context, a arguments) map[string]any {
 	if a.DryRun {
 		// A dry run checks the source without downloading it.
 		draft := map[string]any{"type": as, "file": a.URL, "caption": a.Caption, "filename": a.Filename}
+		if as == "audio" {
+			draft["voice"] = voice
+		}
+		if captionDropped != "" {
+			draft["caption"] = ""
+			draft["warning"] = captionDropped
+		}
 		if reply != nil {
 			draft["reply_to"] = reply.quoted
 		}
@@ -694,6 +711,39 @@ func (s *Server) sendMedia(ctx context.Context, a arguments) map[string]any {
 		}
 		return sendResult(s.delegated(ctx, args...))
 	}
+	var warnings []string
+	if voice {
+		ogg, done, err := toVoiceNote(ctx, path)
+		if err == nil {
+			defer done()
+			args := []string{"send", "voice", "--to", a.To, "--file", ogg, "--mime", voiceMIME}
+			if reply != nil {
+				args = append(args, reply.args...)
+			}
+			out, err := s.delegated(ctx, args...)
+			if err != nil {
+				return toolError("%v", err)
+			}
+			if out == nil {
+				out = map[string]any{}
+			}
+			out["voice"] = true
+			if sec := voiceSeconds(ctx, ogg); sec > 0 {
+				out["seconds"] = sec
+			} else {
+				warnings = append(warnings, "ffprobe could not measure the audio, so the voice note may show no length")
+			}
+			if captionDropped != "" {
+				warnings = append(warnings, captionDropped)
+			}
+			if len(warnings) > 0 {
+				out["warning"] = strings.Join(warnings, "; ")
+			}
+			return sendResult(out, nil)
+		}
+		// Without ffmpeg, or when it fails, the audio still goes, as a file.
+		warnings = append(warnings, "sent as an audio file, not a voice note: "+err.Error())
+	}
 	args := []string{"send", "file", "--to", a.To, "--file", path, "--as", as}
 	if a.Caption != "" {
 		args = append(args, "--caption", a.Caption)
@@ -704,7 +754,17 @@ func (s *Server) sendMedia(ctx context.Context, a arguments) map[string]any {
 	if reply != nil {
 		args = append(args, reply.args...)
 	}
-	return sendResult(s.delegated(ctx, args...))
+	out, err := s.delegated(ctx, args...)
+	if err == nil && as == "audio" {
+		if out == nil {
+			out = map[string]any{}
+		}
+		out["voice"] = false
+		if len(warnings) > 0 {
+			out["warning"] = strings.Join(warnings, "; ")
+		}
+	}
+	return sendResult(out, err)
 }
 
 // isWebP reports whether a file starts like a WebP image, the only format

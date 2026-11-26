@@ -4,6 +4,19 @@ O que muda para quem usa o WhatsApp MCP, versão a versão. Formato baseado no
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), com versões em
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.7.5-voz] - 2026-11-26
+
+### Novo
+
+- **Áudio chega como mensagem de voz.** `send_media_message` com `type`
+  audio converte o arquivo para Ogg Opus mono 48 kHz com o ffmpeg e manda como
+  mensagem de voz (PTT), com a duração e a forma de onda. Mensagem de voz não
+  leva legenda: a legenda fica de fora e o retorno avisa. O parâmetro opcional
+  `voice: false` manda como arquivo de áudio, como antes. Sem o ffmpeg, ou se a
+  conversão falhar, o áudio vai como arquivo e o retorno avisa em `warning`.
+
+Inclui o wacli 0.25.1.
+
 ## [1.7.5] - 2026-11-03
 
 ### Mudou

@@ -139,13 +139,14 @@ func definitions() []any {
 		},
 		map[string]any{
 			"name":        "send_media_message",
-			"description": "Send an image, video, audio, document or sticker, from a URL or from a file on this machine. A sticker must be a WebP image, still or animated, and carries no caption; stickers already received or sent can be reused, since download_media saves them as WebP.",
+			"description": "Send an image, video, audio, document or sticker, from a URL or from a file on this machine. A sticker must be a WebP image, still or animated, and carries no caption; stickers already received or sent can be reused, since download_media saves them as WebP. Audio goes as a voice note by default (converted to Ogg Opus with ffmpeg, with its length and waveform), which carries no caption; pass voice false to send it as an audio file instead. If ffmpeg is missing or fails, the audio goes as a file and the result says so in warning.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 				"to":       stringSchema("Recipient JID or phone number with country code."),
 				"type":     map[string]any{"type": "string", "enum": []string{"image", "video", "audio", "document", "sticker"}},
 				"url":      stringSchema("HTTP(S) URL of the file, or an absolute path to a file on this machine."),
-				"caption":  stringSchema("Optional caption, not for stickers."),
+				"caption":  stringSchema("Optional caption, not for stickers or voice notes."),
 				"filename": stringSchema("Optional file name, for documents."),
+				"voice":    map[string]any{"type": "boolean", "description": "For audio: send it as a voice note (true, the default) or as an audio file (false)."},
 				"reply_to": stringSchema("Optional id of the message to quote, from the same conversation."),
 				"dry_run":  dryRunSchema(),
 			}, "required": []string{"to", "type", "url"}},
