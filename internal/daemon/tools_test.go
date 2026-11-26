@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -192,6 +193,47 @@ func TestNewToolsReachWacliTheRightWay(t *testing.T) {
 	}
 	if _, isErr := callTool(t, port, "send_media_message", map[string]any{"to": testMae, "type": "sticker", "url": webp, "caption": "oi"}); !isErr {
 		t.Error("a sticker with a caption should be refused")
+	}
+
+	// Audio with voice false goes as a file, as before.
+	notAudio := filepath.Join(root, "nota.mp3")
+	_ = os.WriteFile(notAudio, []byte("not audio at all"), 0o600)
+	res, isErr = callTool(t, port, "send_media_message", map[string]any{"to": testMae, "type": "audio", "url": notAudio, "voice": false})
+	if isErr || res["voice"] != false || res["warning"] != nil {
+		t.Errorf("audio as a file: %v", res)
+	}
+	if log := argsLog(); !strings.Contains(log, "send file --to "+testMae+" --file "+notAudio+" --as audio") {
+		t.Errorf("audio not sent as a file:\n%s", log)
+	}
+	// Audio ffmpeg cannot convert still goes, as a file, with a warning.
+	res, isErr = callTool(t, port, "send_media_message", map[string]any{"to": testMae, "type": "audio", "url": notAudio, "caption": "ouve"})
+	if w, _ := res["warning"].(string); isErr || res["voice"] != false || !strings.Contains(w, "not a voice note") {
+		t.Errorf("fallback to a file: %v", res)
+	}
+	if log := argsLog(); !strings.Contains(log, "--as audio --caption ouve") {
+		t.Errorf("fallback did not keep the caption:\n%s", log)
+	}
+	// A dry run says it would go as a voice note, without the caption.
+	res, isErr = callTool(t, port, "send_media_message", map[string]any{"to": testMae, "type": "audio", "url": notAudio, "caption": "ouve", "dry_run": true})
+	if d, _ := res["draft"].(map[string]any); isErr || d == nil || d["voice"] != true || d["caption"] != "" {
+		t.Errorf("voice dry run: %v", res)
+	}
+	if _, isErr := callTool(t, port, "send_media_message", map[string]any{"to": testMae, "type": "image", "url": notWebP, "voice": true}); !isErr {
+		t.Error("voice true on an image should be refused")
+	}
+	// Real audio becomes an Ogg Opus voice note, when ffmpeg is installed.
+	if ffmpeg, err := exec.LookPath("ffmpeg"); err == nil {
+		tone := filepath.Join(root, "tom.wav")
+		if out, err := exec.Command(ffmpeg, "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", tone).CombinedOutput(); err != nil {
+			t.Fatalf("test tone: %v %s", err, out)
+		}
+		res, isErr = callTool(t, port, "send_media_message", map[string]any{"to": testMae, "type": "audio", "url": tone, "caption": "ouve"})
+		if w, _ := res["warning"].(string); isErr || res["voice"] != true || !strings.Contains(w, "no caption") {
+			t.Errorf("voice note: %v", res)
+		}
+		if log := argsLog(); !strings.Contains(log, "send voice --to "+testMae+" --file ") || !strings.Contains(log, "voice.ogg --mime audio/ogg; codecs=opus") {
+			t.Errorf("audio not sent as a voice note:\n%s", log)
+		}
 	}
 
 	// Forwarding and deleting for me need the store: sync pauses.
